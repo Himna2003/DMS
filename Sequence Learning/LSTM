@@ -1,0 +1,38 @@
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras import regularizers
+from tensorflow.keras import layers, Model
+from tensorflow.keras.optimizers import Adam
+from sklearn.utils import class_weight
+from tensorflow.keras.callbacks import ModelCheckpoint
+
+
+class_weights = class_weight.compute_class_weight(
+    'balanced',
+    classes=np.unique(labels),
+    y=labels
+)
+
+class_weights = dict(enumerate(class_weights))
+
+
+input_shape = [50, 256]
+lstm_input = layers.Input(shape=input_shape, name='feature_input')
+lstm = layers.LSTM(50)(lstm_input)
+cls_out = layers.Dense(1, activation='sigmoid')(lstm)
+lstmModel = Model(inputs=lstm_input, outputs=cls_out)
+lstmModel.compile(optimizer=Adam(learning_rate=0.0001), loss='binary_crossentropy', metrics=['accuracy'])
+
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+reduce_LOR    =  ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-7)
+
+# Train Model
+history = lstmModel.fit(
+    x_train, y_train,
+    validation_data=(x_val,y_val),
+    batch_size=16,
+    epochs=70,
+    class_weight=class_weights,
+    callbacks=[early_stopping]
+)
+
