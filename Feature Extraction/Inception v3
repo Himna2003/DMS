@@ -1,0 +1,115 @@
+import cv2
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling2D
+from tensorflow.keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.utils import to_categorical
+
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.applications import InceptionV3
+from tensorflow.keras.models import Model
+from tensorflow.keras.applications.inception_v3 import InceptionV3, preprocess_input
+
+base_model = InceptionV3(weights='imagenet', include_top=False, input_shape=(299, 299, 3))
+for layer in base_model.layers:
+    layer.trainable = False
+
+
+x = GlobalAveragePooling2D()(base_model.output)
+x = Dropout(0.5)(x)
+x = Dense(256, activation='relu')(x)  
+inception_model = Model(inputs=base_model.input, outputs=x)
+
+import cv2
+import numpy as np
+import os
+
+from tensorflow.keras.applications.inception_v3 import preprocess_input
+
+def extract_video_features(video_path, feature_extractor, frame_step=5, target_size=(299, 299)):
+    if not os.path.exists(video_path):
+        print(f"Error: Video file not found at {video_path}")
+        return None
+
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    frame_id = 0
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_id % frame_step == 0:
+            frame = cv2.resize(frame, target_size)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = preprocess_input(frame.astype(np.float32))
+            frames.append(frame)
+        frame_id += 1
+
+    cap.release()
+
+    if not frames:
+        print("Warning: No frames extracted from video.")
+        return None
+        
+    frames = np.array(frames, dtype=np.float32)
+    features = feature_extractor.predict(frames, verbose=0)
+    return features  # (num_frames, feature_dim)
+# Path to video file
+video_path = "/kaggle/input/test-set/testing dataset/distracted behavior/Distracted (11).mp4"
+
+video_features = extract_video_features(video_path, inception_model)
+
+if video_features is not None:
+    print("Extracted Features Shape:", video_features.shape)  # Should be (num_frames, feature_dim)
+else:
+    print("Feature extraction failed.")
+
+dataset_path = "/kaggle/input/test-set"
+video_dir = os.path.join(dataset_path, "testing dataset")
+label_map = {"normal behavior": 0, "distracted behavior": 1}
+
+video_paths = []
+labels = []
+
+for class_name, label in label_map.items():
+    class_folder = os.path.join(video_dir, class_name)
+    for filename in os.listdir(class_folder):
+        if filename.endswith((".mp4", ".avi", ".mov")):
+            video_paths.append(os.path.join(class_folder, filename))
+            labels.append(label)
+
+# Encode labels
+label_encoder = LabelEncoder()
+labels_encoded = label_encoder.fit_transform(labels)
+print("Label Mapping:", dict(zip(label_encoder.classes_, label_encoder.transform(label_encoder.classes_))))
+
+train_paths, val_paths, train_labels, val_labels = train_test_split(
+    video_paths, labels_encoded, test_size=0.2, stratify=labels_encoded, random_state=42
+)
+
+max_sequence_length = 50
+
+def extract_features_batch(video_paths, labels, model, max_sequence_length):
+    data = []
+    processed_labels = []
+
+    for video_path, label in zip(video_paths, labels):
+        print(f"Processing: {video_path}")
+        features = extract_video_features(video_path, model)
+        if features is not None:
+            padded_features = pad_sequences(
+                [features], maxlen=max_sequence_length,
+                dtype='float32', padding='post', truncating='post'
+            )[0]
+            data.append(padded_features)
+            processed_labels.append(label)
+
+    return np.array(data), np.array(processed_labels)
+
+x_train, y_train = extract_features_batch(train_paths, train_labels, inception_model, max_sequence_length)
+x_val, y_val = extract_features_batch(val_paths, val_labels, inception_model, max_sequence_length)
